@@ -71,16 +71,16 @@ on:
           - android15
           - android16
       KERNEL_VERSION:
-       type: choice
-       description: "内核版本"
-       required: true
-       default: "5.15"
-       options:
-         - "5.10"
-         - "5.15"
-         - "6.1"
-         - "6.6"
-         - "6.12"
+        type: choice
+        description: "内核版本"
+        required: true
+        default: "5.15"
+        options:
+          - "5.10"
+          - "5.15"
+          - "6.1"
+          - "6.6"
+          - "6.12"
       BUILD_METHOD:
         type: choice
         description: "编译方式"
@@ -298,7 +298,7 @@ jobs:
                 echo "CONFIG_ZSMALLOC=y" >> "msm-kernel/arch/arm64/configs/${{ github.event.inputs.CPUD }}-GKI.config"
                 echo "CONFIG_ZRAM=y" >> "msm-kernel/arch/arm64/configs/${{ github.event.inputs.CPUD }}-GKI.config"
               fi
-              
+          
               echo "CONFIG_MODULE_SIG_FORCE=n" >> "$CONFIG_FILE"
             elif [ "${{ github.event.inputs.KERNEL_VERSION }}" = "5.10" ] || [ "${{ github.event.inputs.KERNEL_VERSION }}" = "5.15" ]; then
               rm "common/android/gki_aarch64_modules"
@@ -319,36 +319,59 @@ jobs:
         run: |
           cd kernel_workspace
           ./kernel_platform/build_with_bazel.py -t ${{ github.event.inputs.CPUD }} ${{ github.event.inputs.BUILD_METHOD }}
-          
+
       - name: Fallback build kernel
         if: ${{ github.event.inputs.CPU != 'sm8650' && github.event.inputs.CPU != 'sm7675' }}
         run: |
-         cd kernel_workspace
-         LTO=thin SYSTEM_DLKM_RE_SIGN=0 BUILD_SYSTEM_DLKM=0 KMI_SYMBOL_LIST_STRICT_MODE=0 ./kernel_platform/oplus/build/oplus_build_kernel.sh ${{ github.event.inputs.CPUD }} ${{ github.event.inputs.BUILD_METHOD }}
-      
+          set -e
+          cd kernel_workspace
+
+          echo "===== 开始编译 ====="
+          echo "CPUD=${{ github.event.inputs.CPUD }}"
+          echo "BUILD_METHOD=${{ github.event.inputs.BUILD_METHOD }}"
+
+          LTO=thin \
+          SYSTEM_DLKM_RE_SIGN=0 \
+          BUILD_SYSTEM_DLKM=0 \
+          KMI_SYMBOL_LIST_STRICT_MODE=0 \
+          ./kernel_platform/oplus/build/oplus_build_kernel.sh \
+          ${{ github.event.inputs.CPUD }} \
+          ${{ github.event.inputs.BUILD_METHOD }}
+
+          echo "===== 编译命令结束，检查产物 ====="
+          find kernel_platform/out \
+            -type f \
+            \( -name "Image" -o -name "boot.img" -o -name "vmlinux" -o -name "System.map" \) \
+            -exec ls -lh {} \; || true
+
       - name: Debug find kernel artifacts
         if: always()
         run: |
           echo "===== 当前目录 ====="
           pwd
 
-          echo "===== 查找 Image / boot.img ====="
+          echo "===== 查看 Fallback 输出目录文件 ====="
+          find kernel_workspace/kernel_platform/out \
+            -maxdepth 4 \
+            -type f \
+            -exec ls -lh {} \; 2>/dev/null | head -n 300 || true
+
+          echo "===== 查找 Image / boot.img / vmlinux ====="
           find kernel_workspace \
             -type f \
-            \( -name "Image" -o -name "Image.gz" -o -name "Image.gz-dtb" -o -name "boot.img" \) \
+            \( -name "Image" -o -name "Image.gz" -o -name "Image.gz-dtb" -o -name "boot.img" -o -name "vmlinux" -o -name "vmlinux*" \) \
             -exec ls -lh {} \; || true
 
-          echo "===== 查找 dist 目录 ====="
-          find kernel_workspace/kernel_platform \
-            -type d \
-            -name "dist" \
-            -print || true
+          echo "===== 查看 gki dist ====="
+          ls -lah kernel_workspace/kernel_platform/out/msm-kernel-kalama-gki/gki_kernel/dist 2>/dev/null || true
 
-          echo "===== 查看 out 目录 ====="
-          find kernel_workspace/kernel_platform/out \
-            -maxdepth 6 \
-            -type d \
-            2>/dev/null || true
+          echo "===== 查看 consolidate 目录 ====="
+          find kernel_workspace/kernel_platform/out/msm-kernel-kalama-consolidate \
+            -maxdepth 5 \
+            -type f \
+            -exec ls -lh {} \; 2>/dev/null | head -n 300 || true
+          
+          
       - name: Make AnyKernel3
         run: |
           git clone https://github.com/Numbersf/AnyKernel3 --depth=1
