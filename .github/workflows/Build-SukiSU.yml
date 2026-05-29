@@ -325,7 +325,30 @@ jobs:
         run: |
          cd kernel_workspace
          LTO=thin SYSTEM_DLKM_RE_SIGN=0 BUILD_SYSTEM_DLKM=0 KMI_SYMBOL_LIST_STRICT_MODE=0 ./kernel_platform/oplus/build/oplus_build_kernel.sh ${{ github.event.inputs.CPUD }} ${{ github.event.inputs.BUILD_METHOD }}
+      
+      - name: Debug find kernel artifacts
+        if: always()
+        run: |
+          echo "===== 当前目录 ====="
+          pwd
 
+          echo "===== 查找 Image / boot.img ====="
+          find kernel_workspace \
+            -type f \
+            \( -name "Image" -o -name "Image.gz" -o -name "Image.gz-dtb" -o -name "boot.img" \) \
+            -exec ls -lh {} \; || true
+
+          echo "===== 查找 dist 目录 ====="
+          find kernel_workspace/kernel_platform \
+            -type d \
+            -name "dist" \
+            -print || true
+
+          echo "===== 查看 out 目录 ====="
+          find kernel_workspace/kernel_platform/out \
+            -maxdepth 6 \
+            -type d \
+            2>/dev/null || true
       - name: Make AnyKernel3
         run: |
           git clone https://github.com/Numbersf/AnyKernel3 --depth=1
