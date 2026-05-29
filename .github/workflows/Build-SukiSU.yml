@@ -209,14 +209,59 @@ jobs:
           cp -r ../SukiSU_patch/other/zram/lz4k/crypto/* ./common/crypto
           cp -r ../SukiSU_patch/other/zram/lz4k_oplus ./common/lib/
           fi
-
           cd ./common
-          patch -p1 < 50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch || {
-            echo "SUSFS patch failed"
+        
+          set +e
+          patch -p1 < 50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch
+          PATCH_RET=$?
+          set -e
+          
+          echo "===== patch return: $PATCH_RET ====="
+          
+          # 如果只有 mm/memory.c.rej，并且 reject 内容只是缺 susfs_def.h include，则手动修复
+          if [ "$PATCH_RET" -ne 0 ]; then
             echo "===== reject files ====="
             find . -name "*.rej" -print -exec sed -n '1,160p' {} \;
-            exit 1
-          }
+          
+            if [ -f "mm/memory.c.rej" ] && grep -q "susfs_def.h" "mm/memory.c.rej"; then
+              echo "检测到 mm/memory.c 只缺 susfs_def.h include，开始手动补入"
+          
+              python3 - <<'PY'
+          from pathlib import Path
+          
+          p = Path("mm/memory.c")
+          s = p.read_text()
+          
+          block = """#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+          #include <linux/susfs_def.h>
+          #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MAP
+          """
+          
+          if "#include <linux/susfs_def.h>" not in s:
+              marker = "#include <linux/vmalloc.h>\n"
+              if marker not in s:
+                  raise SystemExit("找不到 #include <linux/vmalloc.h>，无法自动插入 susfs_def.h")
+          
+              s = s.replace(marker, marker + block, 1)
+              p.write_text(s)
+          
+          print("memory.c susfs_def.h include fixed")
+          PY
+          
+              rm -f "mm/memory.c.rej"
+            fi
+          
+            # 如果还有其它 rej，说明不是单纯 include 问题，直接失败
+            if find . -name "*.rej" | grep -q .; then
+              echo "仍然存在其它 patch reject，停止编译"
+              find . -name "*.rej" -print -exec sed -n '1,160p' {} \;
+              exit 1
+            fi
+          fi
+          
+          echo "===== check mm/memory.c susfs include ====="
+          grep -n "susfs_def.h\|SUSFS_IS_INODE_SUS_MAP" mm/memory.c || true
+          
           echo "完成"
 
       - name: Apply Hide Stuff Patches
@@ -241,7 +286,7 @@ jobs:
 
           echo "===== check memory.c include ====="
           grep -n "susfs" common/mm/memory.c || true
-          
+
       - name: Apply LZ4KD
         run: |
           cd kernel_workspace/kernel_platform/common
